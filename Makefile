@@ -13,7 +13,7 @@ CXXFLAGS+=-std=c++14 -L$(BOOST_ROOT)/stage/lib -Wl,-rpath $(BOOST_ROOT)/stage/li
 INCLUDES=-I$(BOOST_ROOT)
 LIBS=-lrt -lboost_thread -lboost_system -lboost_program_options -lboost_serialization -lboost_chrono
 ADDITIONAL_SOURCES=
-PROGRAMS=AsyncSTM
+PROGRAMS=async_stm_prototype
 DIRECTORIES=build
 
 all: directories $(PROGRAMS)

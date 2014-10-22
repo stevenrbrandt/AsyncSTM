@@ -4,21 +4,16 @@
 #include <set>
 #include <map>
 #include <future>
+#include <vector>
 #include <functional>
 #include <thread>
 
 #include <assert.h>
 
-// atomic/atomic_base needs to be finished
-// local_atomic_future needs to be implemented
-// RAII locking needs to be added in (should synergize with atomic/atomic_base)
-// * Probably need a locking base class too.
 // transaction should be in a shared_ptr; local_ objects should hold references
 // each async {} block needs to hold a clone()'d copy of any atomic_base variables it uses.
 
 // inside of an async {} block, they can only be read
-
-// lock_list will need to be sorted.
 
 // IO.then([] { /* write my 100GB of plaintext doubles to file */ });
 
@@ -165,6 +160,7 @@ struct transaction
         // 1.) Obtain exclusive access to all the variables. 
         std::list<std::unique_lock<std::mutex> > locks;
 
+        // Variable map is sorted, so order of locking is sorted.
         for ( std::pair<atomic_base*, std::shared_ptr<atomic_base> > const& var
             : variables)
         {
@@ -394,39 +390,40 @@ int main()
         std::cout << "A = " << A.read() << "\n"
                   << "Attempts: " << attempt_count << "\n"; 
     }
-/*
 
-    std::cout << "A = " << A << "\n"
-              << "B = " << B << "\n"; 
+    {
+        atomic<std::vector<double> > U(std::vector<double>(20, 0.0));
+        double const C = 1.0;
 
-    IO.get();
+        std::future<void> exchange;
+        transaction t;
+        do {
+            std::vector<double> U_ = U.get_local(t);
+                    
+            auto Idx =
+                [size = U_.size()] (int i)
+                {
+                    return (i < 0) ? ((i + size) % size) : i % size;
+                };
 
-    A = 4;
+            for (int i = 0; i < U_.size(); ++i)
+            {
+                U_[Idx(i)] = U_[Idx(i)]
+                           + C * (U_[Idx(i-1)] - 2*U_[Idx(i)] + U_[Idx(i+1)]); 
+            } 
 
-    // atomic {
-    //     A = A*A;
-    // }
-    bool fail_first = false;
-    int attempt_count = 0;
-    transaction t2;
-    do {
-        ++attempt_count;
+            t.async(&exchange,
+                [ lower_gz = double(U_[1])
+                , upper_gz = double(U_[U_.size()-1]) 
+                ] ()
+                {
+                    // ... 
+                }
+            );
 
-        local_atomic A_(t2, &A);
+            U.get_local(t) = U_;
+        } while (!t.commit_transaction());
 
-        int tmp = A_*A_;
-
-        if (!fail_first)
-        {
-            A = 3;
-            fail_first = true;
-        }
-
-        // A = A*A
-        A_ = tmp;
-    } while (!t2.commit_transaction());
-
-    std::cout << "A = " << A << "\n"
-              << "Attempts: " << attempt_count << "\n"; 
-*/
+        exchange.get();
+    }
 }
