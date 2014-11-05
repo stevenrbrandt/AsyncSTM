@@ -1,3 +1,7 @@
+#include <hpx/hpx_main.hpp>
+#include <hpx/include/lcos.hpp>
+#include <hpx/async.hpp>
+  
 #include <iostream>
 
 #include <list>
@@ -127,9 +131,9 @@ struct transaction
 
     std::list<
         std::pair<
-            std::future<void>*    // The future we're writing to
+            hpx::future<void>*    // The future we're writing to
                                   // (if NULL, fire-and-forget semantics)
-          , std::function<void()> // The async action to execute
+          , HPX_STD_FUNCTION<void(transaction*)> // The async action to execute
         >
     > async_list;
 
@@ -200,15 +204,15 @@ struct transaction
         }
 
         // 4.) Perform async operations.
-        for ( std::pair<std::future<void>*, std::function<void()> > const& op
+        for ( std::pair<hpx::future<void>*, HPX_STD_FUNCTION<void(transaction*)> >& op
             : async_list)
         {
             // If the future is void, use fire-and-forget semantics.
             if (op.first == NULL)
                 // For HPX version, just use hpx::apply.
-                std::async(op.second);
+                hpx::async(op.second, this);
             else
-                (*op.first) = std::async(op.second);
+                (*op.first) = hpx::async(op.second, this);
         }
 
         // 5.) Release exclusive access.
@@ -235,6 +239,9 @@ struct transaction
 
         if (result.second == true)
         {
+            // FIXME FIXME FIXME: Read list needs a /copy/ of the entry, not a
+            // shared_ptr reference to it.
+
             // Insertion succeeded; this is the first read of the variable.
             (*result.first).second.reset((*var).clone()); // Perform read. 
 
@@ -275,6 +282,9 @@ struct transaction
         }
         else
         { 
+            // FIXME FIXME FIXME: Use write here to avoid the second allocation/
+            // creation of a new shared pointer.
+
             // Insertion failed; the variable is in the internal state.
             (*result.first).second = entry.second; // Perform INTERNAL write.
             
@@ -284,9 +294,9 @@ struct transaction
     }
 
     // If fut is NULL, then fire-and-forget semantics are used.
-    void async(std::future<void>* fut, std::function<void()> F)
+    void async(hpx::future<void>* fut, HPX_STD_FUNCTION<void(transaction*)> F)
     {
-        std::pair<std::future<void>*, std::function<void()> > entry(fut, F);
+        std::pair<hpx::future<void>*, HPX_STD_FUNCTION<void(transaction*)> > entry(fut, F);
         async_list.push_back(entry);
     }
 };
@@ -336,7 +346,7 @@ int main()
     {
         atomic<int> A(4);
         atomic<int> B(1);
-        std::future<void> IO;
+        hpx::future<void> IO;
 
         // future<void> IO;
         // atomic {
@@ -352,7 +362,7 @@ int main()
             A_ = A_*A_;
 
             t.async(&IO,
-                [local_A = int(A_)] () { std::cout << local_A << "\n"; }
+                [local_A = int(A_)] (transaction*) { std::cout << local_A << "\n"; }
             );
 
             A_ = A_ - B_;
@@ -395,7 +405,8 @@ int main()
         atomic<std::vector<double> > U(std::vector<double>(20, 0.0));
         double const C = 1.0;
 
-        std::future<void> exchange;
+        hpx::future<void> exchange;
+        hpx::future<void> I0; 
         transaction t;
         do {
             std::vector<double> U_ = U.get_local(t);
@@ -415,7 +426,7 @@ int main()
             t.async(&exchange,
                 [ lower_gz = double(U_[1])
                 , upper_gz = double(U_[U_.size()-1]) 
-                ] ()
+                ] (transaction*)
                 {
                     // ... 
                 }
@@ -426,4 +437,6 @@ int main()
 
         exchange.get();
     }
+
+    return 0;
 }
