@@ -1,8 +1,8 @@
-#include "async_stm.hpp"
-
 #include <hpx/hpx_main.hpp>
 
 #include <iostream>
+
+#include "async_stm.hpp"
 
 using namespace astm;
 
