@@ -1,4 +1,5 @@
 #include <hpx/hpx_main.hpp>
+#include <hpx/util/lightweight_test.hpp>
 
 #include <iostream>
 
@@ -8,7 +9,105 @@ using namespace astm;
 
 int main()
 {
-    {
+    { // Read A, Write A
+        atomic<int> A(1);
+
+        HPX_TEST(A.read() == 1); 
+
+        transaction t;
+        do {
+            auto A_ = A.get_local(t);
+
+            HPX_TEST(A_ == 1); 
+            A_ = 2; 
+        } while (!t.commit_transaction());
+
+        HPX_TEST(A.read() == 2); 
+    }
+
+    { // Write A, Read A
+        atomic<int> A(1);
+
+        HPX_TEST(A.read() == 1); 
+
+        transaction t;
+        do {
+            auto A_ = A.get_local(t);
+
+            A_ = 2; 
+            HPX_TEST(A_ == 2); 
+        } while (!t.commit_transaction());
+
+        HPX_TEST(A.read() == 2); 
+    }
+
+    { // Write A, Write A
+        atomic<int> A(1);
+
+        HPX_TEST(A.read() == 1); 
+
+        transaction t;
+        do {
+            auto A_ = A.get_local(t);
+
+            HPX_TEST(A_ == 1); 
+            HPX_TEST(A_ == 1); 
+        } while (!t.commit_transaction());
+
+        HPX_TEST(A.read() == 1); 
+    }
+
+    { // Write A, Write A
+        atomic<int> A(1);
+
+        HPX_TEST(A.read() == 1); 
+
+        transaction t;
+        do {
+            auto A_ = A.get_local(t);
+
+            A_ = 2; 
+            A_ = 2; 
+        } while (!t.commit_transaction());
+
+        HPX_TEST(A.read() == 2); 
+    }
+
+    { // Read A, Write A, Read A
+        atomic<int> A(1);
+
+        HPX_TEST(A.read() == 1); 
+
+        transaction t;
+        do {
+            auto A_ = A.get_local(t);
+
+            HPX_TEST(A_ == 1); 
+            A_ = 2; 
+            HPX_TEST(A_ == 2); 
+        } while (!t.commit_transaction());
+
+        HPX_TEST(A.read() == 2); 
+    }
+
+    { // Write A, Read A, Write A
+        atomic<int> A(1);
+
+        HPX_TEST(A.read() == 1); 
+
+        transaction t;
+        do {
+            auto A_ = A.get_local(t);
+
+            A_ = 2; 
+            HPX_TEST(A_ == 2); 
+            A_ = 2; 
+        } while (!t.commit_transaction());
+
+        HPX_TEST(A.read() == 2); 
+    }
+
+    { // Basic arithmetic with local atomics.
         atomic<int> A(4);
         atomic<int> B(1);
 
@@ -25,7 +124,7 @@ int main()
                   << "B = " << B.read() << "\n"; 
     }
 
-    {
+    { // Read A to future.
         atomic<int> A(4);
         atomic<int> B(1);
         hpx::future<void> IO;
@@ -83,7 +182,7 @@ int main()
                   << "Attempts: " << attempt_count << "\n"; 
     }
 
-    {
+    { // Heat equation example (needs fixing)
         atomic<std::vector<double> > U(std::vector<double>(20, 0.0));
         double const C = 1.0;
 

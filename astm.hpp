@@ -25,6 +25,8 @@
 namespace astm
 {
 
+// TODO: rename atomic
+
 // transaction should be in a shared_ptr; local_ objects should hold references
 // each async {} block needs to hold a clone()'d copy of any atomic_base variables it uses.
 
@@ -42,7 +44,7 @@ struct atomic_base
 
     virtual void write(atomic_base const&) = 0;
 
-    virtual std::unique_lock<std::mutex> lock() const = 0;
+    virtual hpx::util::spinlock::scoped_lock lock() const = 0;
 
     virtual bool operator==(atomic_base const&) = 0;
 };
@@ -73,7 +75,7 @@ struct atomic : atomic_base
 
   private:
     T data_;
-    mutable std::mutex mtx_;
+    mutable hpx::util::spinlock mtx_;
 
   public:
     atomic() : data_() {}
@@ -109,9 +111,9 @@ struct atomic : atomic_base
         data_ = dynamic_cast<atomic const*>(&rhs)->read();
     }
 
-    std::unique_lock<std::mutex> lock() const
+    hpx::util::spinlock::scoped_lock lock() const
     {
-        return std::unique_lock<std::mutex>(mtx_); 
+        return hpx::util::spinlock::scoped_lock(mtx_); 
     }
 
     bool operator==(atomic_base const& rhs)
@@ -173,7 +175,7 @@ struct transaction
         // 5.) Release exclusive access.
 
         // 1.) Obtain exclusive access to all the variables. 
-        std::list<std::unique_lock<std::mutex> > locks;
+        std::list<hpx::util::spinlock::scoped_lock> locks;
 
         // Variable map is sorted, so order of locking is sorted.
         for ( std::pair<atomic_base*, std::shared_ptr<atomic_base> > const& var
