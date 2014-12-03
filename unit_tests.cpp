@@ -1,66 +1,75 @@
-#include <hpx/hpx_main.hpp>
-#include <hpx/util/lightweight_test.hpp>
+////////////////////////////////////////////////////////////////////////////////
+//  Copyright (c) 2014 Bryce Adelstein-Lelbach
+//  Copyright (c) 2014 Steve Brandt 
+//
+//  Distributed under the Boost Software License, Version 1.0. (See accompanying
+//  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
+////////////////////////////////////////////////////////////////////////////////
 
 #include <iostream>
 
-#include "async_stm.hpp"
+#include "astm.hpp"
+
+#ifdef ASTM_HPX
+    #include <hpx/hpx_main.hpp>
+#endif
 
 using namespace astm;
 
 int main()
 {
     { // Read A, Write A
-        atomic<int> A(1);
+        shared_var<int> A(1);
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
 
         transaction t;
         do {
             auto A_ = A.get_local(t);
 
-            HPX_TEST(A_ == 1); 
+            ASTM_TEST(A_ == 1); 
             A_ = 2; 
         } while (!t.commit_transaction());
 
-        HPX_TEST(A.read() == 2); 
+        ASTM_TEST(A.read() == 2); 
     }
 
     { // Write A, Read A
-        atomic<int> A(1);
+        shared_var<int> A(1);
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
 
         transaction t;
         do {
             auto A_ = A.get_local(t);
 
             A_ = 2; 
-            HPX_TEST(A_ == 2); 
+            ASTM_TEST(A_ == 2); 
         } while (!t.commit_transaction());
 
-        HPX_TEST(A.read() == 2); 
+        ASTM_TEST(A.read() == 2); 
     }
 
     { // Write A, Write A
-        atomic<int> A(1);
+        shared_var<int> A(1);
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
 
         transaction t;
         do {
             auto A_ = A.get_local(t);
 
-            HPX_TEST(A_ == 1); 
-            HPX_TEST(A_ == 1); 
+            ASTM_TEST(A_ == 1); 
+            ASTM_TEST(A_ == 1); 
         } while (!t.commit_transaction());
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
     }
 
     { // Write A, Write A
-        atomic<int> A(1);
+        shared_var<int> A(1);
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
 
         transaction t;
         do {
@@ -70,46 +79,46 @@ int main()
             A_ = 2; 
         } while (!t.commit_transaction());
 
-        HPX_TEST(A.read() == 2); 
+        ASTM_TEST(A.read() == 2); 
     }
 
     { // Read A, Write A, Read A
-        atomic<int> A(1);
+        shared_var<int> A(1);
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
 
         transaction t;
         do {
             auto A_ = A.get_local(t);
 
-            HPX_TEST(A_ == 1); 
+            ASTM_TEST(A_ == 1); 
             A_ = 2; 
-            HPX_TEST(A_ == 2); 
+            ASTM_TEST(A_ == 2); 
         } while (!t.commit_transaction());
 
-        HPX_TEST(A.read() == 2); 
+        ASTM_TEST(A.read() == 2); 
     }
 
     { // Write A, Read A, Write A
-        atomic<int> A(1);
+        shared_var<int> A(1);
 
-        HPX_TEST(A.read() == 1); 
+        ASTM_TEST(A.read() == 1); 
 
         transaction t;
         do {
             auto A_ = A.get_local(t);
 
             A_ = 2; 
-            HPX_TEST(A_ == 2); 
+            ASTM_TEST(A_ == 2); 
             A_ = 2; 
         } while (!t.commit_transaction());
 
-        HPX_TEST(A.read() == 2); 
+        ASTM_TEST(A.read() == 2); 
     }
 
-    { // Basic arithmetic with local atomics.
-        atomic<int> A(4);
-        atomic<int> B(1);
+    { // Basic arithmetic with local_vars.
+        shared_var<int> A(4);
+        shared_var<int> B(1);
 
         // atomic { A = A*A - B; }
         transaction t;
@@ -120,14 +129,13 @@ int main()
             A_ = A_*A_ - B_;
         } while (!t.commit_transaction());
 
-        std::cout << "A = " << A.read() << "\n"
-                  << "B = " << B.read() << "\n"; 
+        ASTM_TEST(A.read() == 15);
+        ASTM_TEST(B.read() == 1);
     }
 
     { // Read A to future.
-        atomic<int> A(4);
-        atomic<int> B(1);
-        hpx::future<void> IO;
+        shared_var<int> A(4);
+        shared_var<int> B(1);
 
         // future<void> IO;
         // atomic {
@@ -136,27 +144,29 @@ int main()
         //     A = A - B;
         // }
         transaction t;
+        transaction_future IO(t);
+
         do {
             auto A_ = A.get_local(t);
             auto B_ = B.get_local(t);
 
             A_ = A_*A_;
 
-            t.async(&IO,
-                [local_A = int(A_)] (transaction*) { std::cout << local_A << "\n"; }
+            IO.then(
+                [local_A = int(A_)] (transaction*) { ASTM_TEST(local_A == 16); }
             );
 
             A_ = A_ - B_;
         } while (!t.commit_transaction());
 
-        std::cout << "A = " << A.read() << "\n"
-                  << "B = " << B.read() << "\n"; 
+        ASTM_TEST(A.read() == 15);
+        ASTM_TEST(B.read() == 1);
 
         IO.get();
     }
 
     {
-        atomic<int> A(4);
+        shared_var<int> A(4);
 
         // atomic { A = A*A; }
         bool fail = true;
@@ -178,46 +188,9 @@ int main()
             A_ = tmp; 
         } while (!t.commit_transaction());
 
-        std::cout << "A = " << A.read() << "\n"
-                  << "Attempts: " << attempt_count << "\n"; 
+        ASTM_TEST(A.read() == 9);
+        ASTM_TEST(attempt_count == 2);
     }
 
-    { // Heat equation example (needs fixing)
-        atomic<std::vector<double> > U(std::vector<double>(20, 0.0));
-        double const C = 1.0;
-
-        hpx::future<void> exchange;
-        hpx::future<void> I0; 
-        transaction t;
-        do {
-            std::vector<double> U_ = U.get_local(t);
-                    
-            auto Idx =
-                [size = U_.size()] (int i)
-                {
-                    return (i < 0) ? ((i + size) % size) : i % size;
-                };
-
-            for (int i = 0; i < U_.size(); ++i)
-            {
-                U_[Idx(i)] = U_[Idx(i)]
-                           + C * (U_[Idx(i-1)] - 2*U_[Idx(i)] + U_[Idx(i+1)]); 
-            } 
-
-            t.async(&exchange,
-                [ lower_gz = double(U_[1])
-                , upper_gz = double(U_[U_.size()-1]) 
-                ] (transaction*)
-                {
-                    // ... 
-                }
-            );
-
-            U.get_local(t) = U_;
-        } while (!t.commit_transaction());
-
-        exchange.get();
-    }
-
-    return 0;
+    return ASTM_REPORT;
 }

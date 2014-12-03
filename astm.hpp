@@ -6,29 +6,22 @@
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 ////////////////////////////////////////////////////////////////////////////////
 
-#if !defined(ASYNC_STM_DBA88345_57B8_4CC8_A574_D5F007250E94)
-#define ASYNC_STM_DBA88345_57B8_4CC8_A574_D5F007250E94
+#if !defined(ASTM_DBA88345_57B8_4CC8_A574_D5F007250E94)
+#define ASTM_DBA88345_57B8_4CC8_A574_D5F007250E94
 
-#include <hpx/include/lcos.hpp>
-#include <hpx/async.hpp>
+#include "astm_config.hpp"
 
 #include <list>
 #include <set>
 #include <map>
-#include <future>
 #include <vector>
 #include <functional>
-#include <thread>
-
-#include <assert.h>
 
 namespace astm
 {
 
-// TODO: rename atomic
-
 // transaction should be in a shared_ptr; local_ objects should hold references
-// each async {} block needs to hold a clone()'d copy of any atomic_base variables it uses.
+// each async {} block needs to hold a clone()'d copy of any shared_var_base variables it uses.
 
 // inside of an async {} block, they can only be read
 
@@ -36,61 +29,70 @@ namespace astm
 
 // if (/* some atomic condition */) then /* start some async thing to make a bitcoin */
 
-struct atomic_base
+struct shared_var_base
 {
-    virtual ~atomic_base() {}
+    virtual ~shared_var_base() {}
 
-    virtual atomic_base* clone() const = 0;
+    virtual shared_var_base* clone() const = 0;
 
-    virtual void write(atomic_base const&) = 0;
+    virtual void write(shared_var_base const&) = 0;
 
-    virtual hpx::util::spinlock::scoped_lock lock() const = 0;
+    virtual ASTM_LOCK lock() const = 0;
 
-    virtual bool operator==(atomic_base const&) = 0;
+    virtual bool operator==(shared_var_base const&) = 0;
 };
 
 struct transaction;
 
 template <typename T>
-struct atomic : atomic_base
+struct shared_var : shared_var_base
 {
-    struct local_atomic
+    struct local_var
     {
       private:
         transaction* trans_;
-        atomic_base* var_;
+        shared_var_base* var_;
 
       public:
-        local_atomic(transaction* trans, atomic_base* var)
+        local_var(transaction* trans, shared_var_base* var)
           : trans_(trans)
           , var_(var)
         {}
 
-        operator T const& ();
+        T get() const;
 
-        local_atomic& operator=(atomic_base const& rhs);
+        operator T const& () const;
 
-        local_atomic& operator=(T const& rhs);
+        local_var& operator=(shared_var_base const& rhs);
+
+        local_var& operator=(T const& rhs);
     };
 
   private:
     T data_;
-    mutable hpx::util::spinlock mtx_;
+    mutable ASTM_MUTEX mtx_;
 
   public:
-    atomic() : data_() {}
+    shared_var() : data_() {}
 
-    atomic(T const& t) : data_(t) {}
+    shared_var(T const& t) : data_(t) {}
 
-    atomic(T&& t) : data_(t) {}
+    shared_var(T&& t) : data_(t) {}
 
-    ~atomic() { }
+    shared_var(shared_var const& rhs) : data_(rhs.data_) {}
+
+    shared_var& operator=(shared_var const& rhs)
+    {
+        data_ = rhs.data_; 
+    }
+
+    ~shared_var() { }
 
     // Locks.
-    atomic_base* clone() const
+    shared_var_base* clone() const
     {
         auto l = lock();
-        return new atomic(data_);
+        return new shared_var(data_);
     }
 
     // Doesn't lock.
@@ -106,24 +108,52 @@ struct atomic : atomic_base
     }
 
     // Doesn't lock.
-    void write(atomic_base const& rhs)
+    void write(shared_var_base const& rhs)
     {
-        data_ = dynamic_cast<atomic const*>(&rhs)->read();
+        data_ = dynamic_cast<shared_var const*>(&rhs)->read();
     }
 
-    hpx::util::spinlock::scoped_lock lock() const
+    ASTM_LOCK lock() const
     {
-        return hpx::util::spinlock::scoped_lock(mtx_); 
+        return ASTM_LOCK(mtx_); 
     }
 
-    bool operator==(atomic_base const& rhs)
+    bool operator==(shared_var_base const& rhs)
     {
-        return data_ == dynamic_cast<atomic const*>(&rhs)->read(); 
+        return data_ == dynamic_cast<shared_var const*>(&rhs)->read(); 
     }
 
-    local_atomic get_local(transaction& trans)
+    local_var get_local(transaction& trans)
     {
-        return local_atomic(&trans, this); 
+        return local_var(&trans, this); 
+    }
+};
+
+struct transaction_future
+{
+    typedef ASTM_FUTURE<void> future_type;
+
+  private:
+    transaction* trans_;
+    future_type fut_;
+
+  public:
+    transaction_future(transaction* trans)
+      : trans_(trans)
+      , fut_(ASTM_MAKE_READY_FUTURE())
+    {}
+
+    transaction_future(transaction& trans)
+      : trans_(&trans)
+      , fut_(ASTM_MAKE_READY_FUTURE())
+    {}
+
+    template <typename F>
+    void then(F f);
+
+    void get()
+    {
+        fut_.get();
     }
 };
 
@@ -131,28 +161,28 @@ struct transaction
 {
     std::list<
         std::pair<
-            // The atomic variable we're reading from
-            atomic_base* 
+            // The shared variable we're reading from
+            shared_var_base* 
             // The value we read from the variable
-          , std::shared_ptr<atomic_base>
+          , std::shared_ptr<shared_var_base>
         >
     > read_list;
 
     std::set<
-        atomic_base* // The atomic variable we're writing to
+        shared_var_base* // The shared variable we're writing to
     > write_set;
 
     std::list<
         std::pair<
-            hpx::future<void>*    // The future we're writing to
+            ASTM_FUTURE<void>*    // The future we're writing to
                                   // (if NULL, fire-and-forget semantics)
-          , HPX_STD_FUNCTION<void(transaction*)> // The async action to execute
+          , ASTM_FUNCTION<void(transaction*)> // The async action to execute
         >
     > async_list;
 
     std::map<
-        atomic_base* // The atomic variable we're reading from
-      , std::shared_ptr<atomic_base> // Current value of the variable
+        shared_var_base* // The shared variable we're reading from
+      , std::shared_ptr<shared_var_base> // Current value of the variable
     > variables;
 
     void clear()
@@ -175,10 +205,10 @@ struct transaction
         // 5.) Release exclusive access.
 
         // 1.) Obtain exclusive access to all the variables. 
-        std::list<hpx::util::spinlock::scoped_lock> locks;
+        std::list<ASTM_LOCK> locks;
 
         // Variable map is sorted, so order of locking is sorted.
-        for ( std::pair<atomic_base*, std::shared_ptr<atomic_base> > const& var
+        for ( std::pair<shared_var_base*, std::shared_ptr<shared_var_base> > const& var
             : variables)
         {
             assert(var.first != NULL);
@@ -187,7 +217,7 @@ struct transaction
         }
         
         // 2.) Compare our recorded reads against the current values (and fail if needed).
-        for ( std::pair<atomic_base*, std::shared_ptr<atomic_base> > const& var
+        for ( std::pair<shared_var_base*, std::shared_ptr<shared_var_base> > const& var
             : read_list)
         {
             assert(var.first != NULL);
@@ -205,7 +235,7 @@ struct transaction
         }
 
         // 3.) Perform writes, reading from our internal map.
-        for (atomic_base* var : write_set)
+        for (shared_var_base* var : write_set)
         {
             assert(var != NULL);
 
@@ -217,22 +247,22 @@ struct transaction
         }
 
         // 4.) Perform async operations.
-        for ( std::pair<hpx::future<void>*, HPX_STD_FUNCTION<void(transaction*)> >& op
+        for ( std::pair<ASTM_FUTURE<void>*, ASTM_FUNCTION<void(transaction*)> >& op
             : async_list)
         {
             // If the future is void, use fire-and-forget semantics.
             if (op.first == NULL)
                 // For HPX version, just use hpx::apply.
-                hpx::async(op.second, this);
+                ASTM_ASYNC(op.second, this);
             else
-                (*op.first) = hpx::async(op.second, this);
+                (*op.first) = (*op.first).then(std::bind(op.second, this));
         }
 
         // 5.) Release exclusive access.
         return true; 
     }
 
-    atomic_base const& read(atomic_base* var)
+    shared_var_base const& read(shared_var_base* var)
     {
         // We have two cases here:
         // * The variable has not been read or written in this transaction, and is
@@ -245,7 +275,7 @@ struct transaction
         // We will attempt an insertion with a placeholder value, to avoid a
         // speculative read and performing the map lookup twice (find then insert)
         // for first-time entries.
-        std::pair<atomic_base*, std::shared_ptr<atomic_base> > entry(var, 0);
+        std::pair<shared_var_base*, std::shared_ptr<shared_var_base> > entry(var, 0);
 
         // This auto will be a std::pair<iterator, bool>.
         auto result = variables.insert(entry);
@@ -268,7 +298,7 @@ struct transaction
             return (*(*result.first).second);
     }
 
-    void write(atomic_base* var, atomic_base const& value)
+    void write(shared_var_base* var, shared_var_base const& value)
     {
         // We have two cases here:
         // * The variable has not been read or written in this transaction, and is
@@ -280,8 +310,8 @@ struct transaction
 
         // We will attempt an insertion, to avoid performing the map lookup twice
         // (find then insert) for first-time entries.
-        std::pair<atomic_base*, std::shared_ptr<atomic_base> >
-            entry(var, std::shared_ptr<atomic_base>(value.clone()));
+        std::pair<shared_var_base*, std::shared_ptr<shared_var_base> >
+            entry(var, std::shared_ptr<shared_var_base>(value.clone()));
 
         // This auto will be a std::pair<iterator, bool>.
         auto result = variables.insert(entry);
@@ -307,37 +337,50 @@ struct transaction
     }
 
     // If fut is NULL, then fire-and-forget semantics are used.
-    void async(hpx::future<void>* fut, HPX_STD_FUNCTION<void(transaction*)> F)
+    void then(ASTM_FUTURE<void>* fut, ASTM_FUNCTION<void(transaction*)> F)
     {
-        std::pair<hpx::future<void>*, HPX_STD_FUNCTION<void(transaction*)> > entry(fut, F);
+        std::pair<ASTM_FUTURE<void>*, ASTM_FUNCTION<void(transaction*)> > entry(fut, F);
         async_list.push_back(entry);
     }
 };
 
 template <typename T>
-atomic<T>::local_atomic::operator T const& () 
+shared_var<T>::local_var::operator T const& () const 
 {
-    return dynamic_cast<atomic const*>(&trans_->read(var_))->read();
+    return dynamic_cast<shared_var const*>(&trans_->read(var_))->read();
 }
 
 template <typename T>
-typename atomic<T>::local_atomic&
-atomic<T>::local_atomic::operator=(atomic_base const& rhs)
+T shared_var<T>::local_var::get() const 
+{
+    return dynamic_cast<shared_var const*>(&trans_->read(var_))->read();
+}
+
+template <typename T>
+typename shared_var<T>::local_var&
+shared_var<T>::local_var::operator=(shared_var_base const& rhs)
 {
     trans_->write(var_, rhs);
     return *this;
 }
 
 template <typename T>
-typename atomic<T>::local_atomic&
-atomic<T>::local_atomic::operator=(T const& rhs)
+typename shared_var<T>::local_var&
+shared_var<T>::local_var::operator=(T const& rhs)
 {
-    atomic tmp(rhs);
+    shared_var tmp(rhs);
     trans_->write(var_, tmp);
     return *this;
 }
 
+template <typename F>
+void transaction_future::then(F f)
+{
+    assert(trans_);
+    trans_->then(&fut_, f); 
+}
+
 } // namespace astm
 
-#endif // ASYNC_STM_DBA88345_57B8_4CC8_A574_D5F007250E94
+#endif // ASTM_DBA88345_57B8_4CC8_A574_D5F007250E94
 
