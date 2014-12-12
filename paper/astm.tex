@@ -118,25 +118,43 @@ xleftmargin=0.1cm,
 %   * The problem: STM is limited to side effect free code
 %   * Literature review: what people have tried
 %   * Overview of our approach
-%       * HPX
+%
+
+\subsection{HPX}
+
+HPX is a general purpose parallel runtime system for applications of any scale.
+It exposes a homogeneous programming model which unifies the execution of remote
+and local operations. The runtime system has been developed for conventional
+architectures. Currently supported are SMP nodes, large Non Uniform Memory Access
+(NUMA) machines and heterogeneous systems such as clusters equipped with Xeon Phi
+accelarators. Strict adherence to Standard C++~\cite{cxx11_standard} and the
+utilization of the Boost C++ Libraries~\cite{boostcpplibraries} makes HPX both
+portable and highly optimized.
+The source code is published under the Boost Software
+License~\fxnote{cite} making it accessible to everyone as Open Source Software.
+It is modular, feature-complete and designed for
+best possible performance. HPX's design focuses on overcoming conventional
+limitations such as (implicit and explicit) global barriers, poor latency hiding,
+static-only resource allocation, and lack of support for medium- to fine-grain
+parallelism.
 
 \section{Technical Approach}
 
-Our STM system consists of three primary components. $transaction$ objects
-represents a single transaction. It is responsible for orchestrating reads and
-writes that ooccur in a single transaction attempt, and it manages commit
-attempts. A $transaction$ owns the storage for transaction-local
-storage. Variables that are used in transactions are represented by
-$shared\_var$ wrappers.  $shared\_var$s wrap an underlying type,
+Our system consists of three primary components. Transaction objects
+represents a single transaction. They are responsible for orchestrating reads and
+writes that occur in a transaction attempt, and they manage commit
+attempts. A transaction object owns the storage for transaction-local
+variables. Data that is used in transactions is represented by
+transaction variables wrappers. These wrappers proxy an underlying type,
 providing the functionality necessary for usage inside of a transaction.
-Finally, $transaction_future$s represent continuations launched within
+Finally, transaction futures represent continuations launched within
 transactions.
 
 \subsection{Transaction Objects}
 
-A $transaction$ object is an entity that represents the a single transaction
+A transaction object is an entity that represents a single transaction
 block. In our system, a transaction block is formed in native C++ using a
-do-while loop and a transaction object ~\ref{?}.
+do-while loop and a transaction object:
 
 $
 transaction t
@@ -155,9 +173,46 @@ failure during the commit, and updates to write-variables need to be buffered.
 Additionally, any continuations launched within the transaction need to be
 buffered so that they can be launched on a successful commit.
 \item Implement the four basic operations which occur in transactions:
-\textbf{read}, \textbf{write}, \textbf{async}, \textbf{abort} and
-\textbf{commit}. TODO
+\textbf{read}, \textbf{write}, \textbf{async}, and
+\textbf{commit}.
 \end{itemize}
+
+The transaction object uses four data structures to implement transaction-local
+storage: a map containing the local state of transaction variables and three
+structures which store the information needed to process a commit attempt (one
+for reads, one for writes and one for async operations). 
+
+The local state of all variables accessed during the course of a transaction
+are stored in an ordered map. This local state is indexed by the memory address
+of the transaction wrapper object which is being accessed. Upon insertion into
+the map, the transaction wrapper is deep-copied. Every time a variable is
+externally read, the value which is read is addded to a read list. The elements
+of this list have the same key-value structure of the variable map. Whenever an
+internal write operation occurs, an entry is added to a write set to keep track
+of which entries in the variable map will need to be written externally upon
+commit.
+
+The read operation instructions requests access to a local copy a transaction
+variable. If the variable is not present in the transaction's local state, a
+thread-safe read of the actual variable value will occur. This value will be
+added to the variable map and the read list. If the variable has been written
+prior to the read in the transaction, no external read is performed. Instead,
+the buffered value from the write will be read from the local variable map
+and the map entry will be added to the read list.
+
+The write operation is mostly symmetric to the read operation. A local write to
+a variable that has not been previously accessed will create a new entry in the
+variable map, but no external read will be made. A write operation will add the
+variable's memory reference to the write set.
+
+The async operation is the novel aspect of our system. This operation will
+buffer a continuation, which will be launched asynchronously upon the
+successful commit of the transaction. The async operation takes two
+arguments; a bound function to be invoked, and a reference to the future
+object which the operation will be appended to. The future object can be
+thought of as a queue; when a transaction commits, callbacks are simply
+appended to their futures using .then(). When the action associated with the
+future becomes ready, the continuation will begin immediately.
 
 TODO: Description of operations
 
@@ -182,6 +237,8 @@ inside and outside of transactions.
 
 TODO
 
+\subsection{Variable Queues}
+
 \section{Applications/Results}
 
 \section{Future Work/Conclusions}
@@ -189,8 +246,8 @@ TODO
 % use section* for acknowledgement
 \section*{Acknowledgment}
 
-\bibliographystyle{IEEEtran}
-\bibliography{IEEEabrv,astm}
+%\bibliographystyle{IEEEtran}
+%\bibliography{astm}
 
 % that's all folks
 \end{document}

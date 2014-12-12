@@ -12,7 +12,7 @@ endif
 
 CXXFLAGS+=-std=c++1y -I. -g
 ADDITIONAL_SOURCES=
-PROGRAMS=binary_tree
+PROGRAMS=binary_tree unit_tests concurrency_tests 
 DIRECTORIES=build
 
 all: directories $(PROGRAMS)

@@ -39,14 +39,45 @@ struct shared_var_base
 
     virtual ASTM_LOCK lock() const = 0;
 
-    virtual bool operator==(shared_var_base const&) = 0;
+    virtual bool operator==(shared_var_base const&) const = 0;
 };
 
 struct transaction;
 
+struct transaction_future
+{
+    typedef ASTM_FUTURE<void> future_type;
+
+  private:
+    transaction* trans_;
+    future_type fut_;
+
+  public:
+    transaction_future(transaction* trans)
+      : trans_(trans)
+      , fut_(ASTM_MAKE_READY_FUTURE())
+    {}
+
+    transaction_future(transaction& trans)
+      : trans_(&trans)
+      , fut_(ASTM_MAKE_READY_FUTURE())
+    {}
+
+    template <typename F>
+    void then(F f);
+
+    void get()
+    {
+        fut_.get();
+    }
+};
+
+
 template <typename T>
 struct shared_var : shared_var_base
 {
+    typedef ASTM_FUTURE<void> future_type;
+
     struct local_var
     {
       private:
@@ -66,25 +97,25 @@ struct shared_var : shared_var_base
         local_var& operator=(shared_var_base const& rhs);
 
         local_var& operator=(T const& rhs);
+
+        template <typename F>
+        void then(F f);
     };
 
   private:
     T data_;
     mutable ASTM_MUTEX mtx_;
-
+    
   public:
-    shared_var() : data_() {}
+    future_type queue;
+    
+    shared_var() : data_(), mtx_(), queue(ASTM_MAKE_READY_FUTURE()) {}
 
-    shared_var(T const& t) : data_(t) {}
+    shared_var(T const& t) : data_(t), mtx_(), queue(ASTM_MAKE_READY_FUTURE()) {}
 
-    shared_var(T&& t) : data_(t) {}
+    shared_var(T&& t) : data_(t), mtx_(), queue(ASTM_MAKE_READY_FUTURE()) {}
 
-    shared_var(shared_var const& rhs) : data_(rhs.data_) {}
-
-    shared_var& operator=(shared_var const& rhs)
-    {
-        data_ = rhs.data_; 
-    }
+    shared_var(shared_var const& rhs) : data_(rhs.data_), mtx_(), queue(ASTM_MAKE_READY_FUTURE()) {}
 
     ~shared_var() { }
 
@@ -118,7 +149,7 @@ struct shared_var : shared_var_base
         return ASTM_LOCK(mtx_); 
     }
 
-    bool operator==(shared_var_base const& rhs)
+    bool operator==(shared_var_base const& rhs) const
     {
         return data_ == dynamic_cast<shared_var const*>(&rhs)->read(); 
     }
@@ -126,34 +157,6 @@ struct shared_var : shared_var_base
     local_var get_local(transaction& trans)
     {
         return local_var(&trans, this); 
-    }
-};
-
-struct transaction_future
-{
-    typedef ASTM_FUTURE<void> future_type;
-
-  private:
-    transaction* trans_;
-    future_type fut_;
-
-  public:
-    transaction_future(transaction* trans)
-      : trans_(trans)
-      , fut_(ASTM_MAKE_READY_FUTURE())
-    {}
-
-    transaction_future(transaction& trans)
-      : trans_(&trans)
-      , fut_(ASTM_MAKE_READY_FUTURE())
-    {}
-
-    template <typename F>
-    void then(F f);
-
-    void get()
-    {
-        fut_.get();
     }
 };
 
@@ -371,6 +374,14 @@ shared_var<T>::local_var::operator=(T const& rhs)
     shared_var tmp(rhs);
     trans_->write(var_, tmp);
     return *this;
+}
+
+template <typename T>
+template <typename F>
+void shared_var<T>::local_var::then(F f)
+{
+    assert(trans_);
+    trans_->then(&dynamic_cast<shared_var const*>(&trans_)->queue, f); 
 }
 
 template <typename F>

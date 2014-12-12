@@ -12,6 +12,8 @@
 
 #include "astm.hpp"
 
+#include "astm_new.hpp"
+
 #ifdef ASTM_HPX
     #include <hpx/hpx_main.hpp>
 #endif
@@ -43,6 +45,13 @@ struct binary_tree
         node(Key k, Value const& v)
           : key(k), value(v), left(), right()
         {} 
+
+/*
+        bool operator==(node const& rhs) const
+        {
+            return key == rhs.key; 
+        }
+*/
     };
 
     binary_tree()
@@ -103,7 +112,7 @@ struct binary_tree
     }
 */
 
-    void insert(Key key, Value const& value, shared_var<node*> leaf, transaction& t)
+    void insert(Key key, Value const& value, shared_var<node*>& leaf, transaction& t)
     {
         auto leaf_ = leaf.get_local(t);
 
@@ -126,16 +135,14 @@ struct binary_tree
         }
     }
 
-    node* search(Key key, shared_var<node*> leaf, transaction& t)
+    node* search(Key key, shared_var<node*>& leaf, transaction& t)
     {
         auto leaf_ = leaf.get_local(t);
 
         if (leaf_.get() != 0)
         {
-            if (true)//key == leaf_.get()->key.get_local(t).get())
-            { std::cout << "Pong\n" << std::endl;
-                return 0; //leaf_.get();
-            }
+            if (key == leaf_.get()->key.get_local(t).get())
+                return leaf_.get();
             if (key < leaf_.get()->key.get_local(t).get())
                 return search(key, leaf_.get()->left, t);
             else
@@ -143,7 +150,6 @@ struct binary_tree
         }
         else
         {
-            std::cout << "Ping\n" << std::endl;
             return 0; 
         }
     }
@@ -160,10 +166,9 @@ int main()
 
         auto n = tree.search(1);
 
-//        std::cout << reinterpret_cast<uint64_t>(n) << "\n";
+        std::cout << n->value << "\n"; 
     }
 
     return 0;
 }
-
 

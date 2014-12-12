@@ -6,13 +6,13 @@ default: pdf
 
 pdf:
 	-$(PSTEX) --interaction=batchmode $(PAPER)
-	bibtex $(PAPER)
+	#bibtex $(PAPER)
 	-$(PSTEX) --interaction=batchmode $(PAPER)
 	$(PDFTEX) $(PAPER)
 
 dvi:
 	$(PSTEX) $(PAPER)
-	bibtex $(PAPER)
+	#bibtex $(PAPER)
 	$(PSTEX) $(PAPER)
 	$(PSTEX) $(PAPER)
 

@@ -21,7 +21,7 @@ namespace astm
         return var.queue.then(
             [=] (ASTM_FUTURE<void> f)
             {
-                ptr = new T(std::forward<Args>(args...));
+                ptr = new T(std::forward<Args&&>(args)...);
             }
         );
     }
