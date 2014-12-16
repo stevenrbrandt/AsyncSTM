@@ -232,7 +232,7 @@ inside and outside of transactions.
 \item Enforces the invarants regarding variable access in our system.
 \end{itemize}
 
-Transaction variables expose most of their functionality through \textbf{local variable} objects. A local variable is a proxy object that holds a memory reference to a transaction variable and a memory reference to a transaction. Local variables are representations of the value of a transaction variable within a given transaction. These local variables use a smart pointer interface. Dereferencing a local variable will produce an object that can be assigned to; such an assignment is implemented using the write operation of the transaction manager. The structure dereference operator can be used to invoke non-mutating methods of the underlying type, and the indirection operator can be used to produce a constant reference to an object of the underlying type. Both of these operations are implemented using the read operation of the transaction manager. A syntax table for local variables is provided below.
+Transaction variables expose most of their functionality through \textbf{local variable} objects. A local variable is a proxy object that holds a memory reference to a transaction variable and a memory reference to a transaction. Local variables are representations of the value of a transaction variable within a given transaction. These local variables use a smart pointer interface. Dereferencing a local variable will produce an object that can be assigned to; such an assignment is implemented using the write operation of the transaction manager. The structure dereference operator can be used to invoke non-mutating methods of the underlying type, and the indirection operator can be used to produce a constant reference to an object of the underlying type. Both of these operations are implemented using the read operation of the transaction manager. A syntax table for local variables is provided below; the syntax and semantics of local variables is based on C++ \lstinline$std::shared_ptr<>$.
 
 \begin{table}[htbp]
 \center
@@ -269,13 +269,127 @@ However, the async operation introduces potential concurrency issues which must 
 
 To solve this problem, we take advantage of the composability of futures. C++ futures allow the construction of dependency chains. Instead of waiting for the value of a future to become ready, application code can pass a callback function to the future which will be invoked when the data is ready. The operation that registers such a callback is called \lstinline$then()$, and it returns another future (representing the execution of the callback), which enables chaining. Another operation, \lstinline$when_all()$, allow the composition of multiple futures into one future, which can then have a callback attached to it in the same fashion.
 
-The async operation in ASTM makes use of the \lstinline$then()$ method to launch escaped functions. Application code provides a future as an argument to the transaction managers async operation. If this future is null, then the escaped function does not have any dependencies, and after the transaction commits successfully it will be scheduled without constraints. If the future is not null, then the escaped function will be attached to it as a callback. In either case, the async operation will create a new future during a successful commit; this new future will be assigned to the argument passed to async within the transaction (the operation is similar to the effect of compound assignment operators such as +=).
+The async operation in ASTM makes use of the \lstinline$then()$ method to launch escaped functions. Application code provides a future as an argument to the transaction managers async operation. If this future is empty, then the escaped function does not have any dependencies, and after the transaction commits successfully it will be scheduled without constraints (in this case, the empty future argument passed to the async operation will be used to hold the return value of \lstinline$hpx::async$). If the future is not null, then the escaped function will be attached to it as a callback (via the \lstinline$then()$ method). In either case, the async operation will create a new future during a successful commit; this new future will be assigned to the argument passed to async within the transaction (the operation is similar to the effect of compound assignment operators such as \lstinline$+=$).
 
 This functionality allows escaped functions to access shared data safely. As mentioned, applications using escaped functions will divide their data into two categories: objects accessed only from within transactions, and objects accessed only from escaped functions. The shared objects accessed through escaped functions are represented by future objects in the application codes. When an escaped function needs to access one of these objects, it will be attached to the object as a callback function. As long as all shared data accessed by escaped functions is passed by futures, concurrency will be guranteed.
 
 \section{Applications/Results}
 
 \subsection{Binary Tree with Side-Effecting Constructors}
+
+Generic, concurrent containers are often used as the building blocks of large-scale parallel applications. We present an example implementation of an unbalanced binary tree implemented using ASTM. This binary tree  supports the use of values which are have side-effecting constructors. The following requirements are placed on the user-supplied types \lstinline$Key$ and \lstinline$Value$:
+
+\begin{itemize}
+\item \lstinline$Key$ must be copyable, assignmable, comparable and sortable; these operations must be side-effect free.
+\item \lstinline$Value$ must be copyable.
+\end{itemize}
+
+Each tree node consists of four data members: the key, the value and two child pointers (left and right). The key and the child pointers are stored in transaction variables (\lstinline$astm::variable<>$). The value is stored in a transaction future (\lstinline$astm::future<>$). 
+
+The listing below presents the code for the node class:
+
+\begin{lstlisting}
+template <typename Key, typename Value>
+struct node
+{
+  astm::variable<Key> key;
+  astm::future<std::shared_ptr<Value> > value;
+  astm::variable<node> left;
+  astm::variable<node> right;
+
+  node() = default;
+
+  node(Key k, Value const& v, astm::transaction& t)
+    : key(k)
+  {
+	astm::new_<Value>(value, t, v);
+  }
+};
+\end{lstlisting}
+
+During construction of a non-empty node, \lstinline$astm::new_<>$ is used to allocate the value of the node. This routine creates an escaped function which will perform the actual allocation and object construction when the transaction \lstinline$t$ commits successfully. If the transaction fails, the tree is not modified and no allocation is performed; e.g. the tree gurantees that instances of \lstinline$Value$ will never be created speculatively.
+
+Below is a simplified version of the \lstinline$astm::new_<>$ routine, which demonstrates how escaped functions are launched in a transaction.
+
+\begin{lstlisting}
+template <typename T, typename... Args>
+astm::future<std::shared_ptr<T> >   
+new_(astm::future<std::shared_ptr<T>& fut,
+         astm::transaction& t, Args&&... args
+        ) 
+{
+  return t.async(fut, 
+    [=] (astm::future<std::shared_ptr<T> > f)
+    {
+       return new T(std::forward<Args&&>(args)...);
+    }
+  );
+}
+\end{lstlisting}
+
+The \lstinline$async$ operation of the transaction manager (\lstinline$astm::transaction$) takes two arguments, as described in the preceding section. The \lstinline$fut$ argument of \lstinline$astm::new_<>$ is either an empty future (indicating that the operation has no dependencies) or a non-empty future (indicating that the allocation must be attached to the future and wait on it). The rest of the arguments are passed to the constructor of the underlying type.
+
+In the case of the binary tree, we call \lstinline$astm::new_<>$ when a new tree node is being constructed, so there are no dependencies (the future representing the value is empty). If we were to define a copy operation for a tree node, we would be calling \lstinline$astm::new_<>$ with the future of the LHS of the assignment, and the value of the RHS of the assignment. In this case, the escaped allocation would be attached as a continuation to the LHS of the assignment, waiting for any preceeding operations on it to complete before overwriting the value of the LHS with the value of the RHS.
+
+The following code implements insertion for our container:
+
+\begin{lstlisting}
+void insert(Key key, Value const& value,
+            astm::variable<node>& leaf,
+            astm::transaction& t
+           )
+{
+  auto leaf_     = leaf.local(t);
+  auto leaf_key_ = leaf_->key.local(t);
+
+  if (key < *leaf_key_)
+  {
+    auto leaf_left_ = leaf_->left.local(t);
+
+    if (leaf_left_ != nullptr)
+      insert(key, value, leaf_->left, t);
+    else
+      leaf_left_ = new node(key, value, t); 
+  }
+
+  else if (key >= *leaf_key_)
+  {
+    auto leaf_right_ = leaf_->right.local(t);
+
+    if (leaf_right_ != nullptr)
+      insert(key, value, leaf_->right, t);
+    else
+      leaf_->right = new node(key, value, t);
+  }
+}
+\end{lstlisting}
+
+The algorithm is fairly similar to what the serial implementation built with \lstinline$std::shared_ptr<>$ might look like. First, a local variable to the \lstinline$leaf$ transaction variable (a parameter) is obtained. Then we obtain the local variable for the key of the leaf- a read operation occurs here when we access the leaf through the structure derefence operator (\lstinline$leaf_->key.local(t)$). Next, we compare the key being inserted (which is a regular C++ variable) to the the leaf key. The comparison expression (\lstinline$key < *leaf_key_$) will invoke a read operation on the leaf key.
+
+The rests of the comparisons in the routine are similar in nature. First a local variable referring to a data member of a particular node instance is obtained, which invokes a read operation on the node. Then the data member itself is read when it is dereferenced in the comparison expression. 
+
+Once the location for the new node is found through recursion of the tree, the insertion is performed by allocating a new tree node and assigning it to the local variable which references the correct child pointer. As we have mentioned, the tree node will not allocate its associated value when it is created; the creation of the value is deferred until the transaction commits successfully. The construction of the tree node is therefore cheap - only the key and two empty nodes (the child pointers) need to be constructed. If the transaction fails to commit, the tree node which was speculatively constructed during the transaction will be destroyed properly, because the commit algorithm will clear the state of the transaction which will release the last reference count to the  tree node.
+
+Finally, we have the top-level interface for the insert algorithm, which starts the transaction:
+
+\begin{lstlisting}
+void insert(Key key, Value const& value,
+                astm::variable<node>& root
+               )
+{
+  astm::transaction t;
+  do {
+    auto root_ = root.local(t);
+
+    if (*root_ != 0)
+      insert(key, value, root, t);
+    else
+      root_ = new node(key, value, t);
+  } while (!t.commit());
+}
+\end{lstlisting}
+
+As we can see from this example, the syntax of ASTM abstracts programmers away from performing explicit reads and writes through the use of smart pointer syntax and semantics. However, it is easy to identify where these operations will occur in the code; structure dereference (->) and indirection (*) will cause read operations and assignment will cause write operations.
 
 \section{Future Work/Conclusions}
 
