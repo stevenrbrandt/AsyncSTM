@@ -14,6 +14,7 @@
 namespace astm
 {
     // Asynchronous object allocation  
+    /*
     template <typename Var, typename T, typename... Args>
     ASTM_FUTURE<void>   
     new_(shared_var<Var>& var, T* ptr, Args&&... args) 
@@ -21,10 +22,11 @@ namespace astm
         return var.queue.then(
             [=] (ASTM_FUTURE<void> f)
             {
-                ptr = new T(std::forward<Args&&>(args)...);
+                //ptr = new T(std::forward<Args&&>(args)...);
             }
         );
     }
+    */
 }
 
 #endif

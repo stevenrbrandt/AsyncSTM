@@ -84,7 +84,7 @@ xleftmargin=0.1cm,
 
 \begin{document}
 
-\title{The Paper Formerly Known As "ASTM Paper"}
+\title{The Atomic Future of Software Transactional Memory}
 
 \author{
 \IEEEauthorblockN{Bryce Adelstein-Lelbach\IEEEauthorrefmark{1}, Steve Brandt\IEEEauthorrefmark{1}}
@@ -96,7 +96,7 @@ xleftmargin=0.1cm,
 
 
 \begin{abstract}
-In recent years, Software Transactional Memory has become an increasing popular solution for managing concurrency. STM has a number of advantages over traditional approaches (such as locking), but it also has the disadvantage of placing rigid regulations on code contained in critical sections. Many STM models lack mechanisms for integrating side-effecting code into applications. These restrictions limit the usefulness of STM in software that frequently interact with hardware. This paper describes a model for an STM system which supports the asynchronous invocation of side-effecting code from within a transaction. We present the details of the system and examine two use cases for our design.
+In recent years, Software Transactional Memory has become an increasing popular solution for managing concurrency. STM has a number of advantages over traditional approaches (such as locking), but it also has the disadvantage of disallowing side-effecting code inside atomic blocks. This restriction limits the usefulness of STM in software that frequently interacts with hardware. This paper describes a model for an STM system which supports the asynchronous invocation of side-effecting code from within a transaction, and the use of a special kind of future, an ``atomic future'' if you will, to represent the result of an STM calculation. We present the details of the system and examine two use cases for our design.
 \end{abstract}
 
 
